@@ -50,11 +50,16 @@ if (process.env.NODE_ENV !== 'test') {
 
 // ❤️ Health check
 app.get('/health', (req, res) => {
+  app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'OneCampus API is running',
-    timestamp: new Date().toISOString(),
-    version: '1.0.0',
+    message: 'Welcome to OneCampus API 🚀',
+    endpoints: {
+      health: '/health',
+      auth: '/api/auth',
+      announcements: '/api/announcements',
+      materials: '/api/materials'
+    }
   });
 });
 
