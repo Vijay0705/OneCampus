@@ -6,27 +6,31 @@ const MAX_ORDERS_PER_SLOT = 50;
 const addItem = async (req, res) => {
   try {
     const db = getFirestore();
-    const { name, price, quantity } = req.body;
+    const { name, price, quantity, description, category } = req.body;
 
     const today = new Date().toISOString().split('T')[0];
-
     const ref = db.collection('canteen_items').doc();
 
-    await ref.set({
+    const newItem = {
       id: ref.id,
       name,
-      price,
-      quantity,
-      available_quantity: quantity,
+      description: description || '',
+      price: Number(price),
+      quantity: Number(quantity),
+      available_quantity: Number(quantity),
       is_available: true,
+      category: category || 'General',
       date: today,
       createdAt: new Date().toISOString()
-    });
+    };
 
-    res.json({ message: "Item added" });
+    await ref.set(newItem);
 
-  } catch {
-    res.status(500).json({ message: "Error adding item" });
+    res.json({ success: true, message: "Item added", data: newItem });
+
+  } catch (error) {
+    console.error('addItem error:', error);
+    res.status(500).json({ success: false, message: "Error adding item" });
   }
 };
 
@@ -48,8 +52,9 @@ const getTodayItems = async (req, res) => {
 
     res.json({ success: true, data: { items } });
 
-  } catch {
-    res.status(500).json({ message: "Error fetching menu" });
+  } catch (error) {
+    console.error('getTodayItems error:', error);
+    res.status(500).json({ success: false, message: "Error fetching menu" });
   }
 };
 
@@ -72,17 +77,18 @@ const placeOrder = async (req, res) => {
       }
 
       let total = 0;
+      const enrichedItems = [];
 
       for (let item of items) {
         const ref = db.collection('canteen_items').doc(item.item_id);
         const doc = await t.get(ref);
 
-        if (!doc.exists) throw new Error("Item not found");
+        if (!doc.exists) throw new Error(`Item ${item.item_id} not found`);
 
         const data = doc.data();
 
         if (!data.is_available || data.available_quantity < item.quantity) {
-          throw new Error("Out of stock");
+          throw new Error(`${data.name} is out of stock`);
         }
 
         t.update(ref, {
@@ -90,7 +96,14 @@ const placeOrder = async (req, res) => {
           is_available: data.available_quantity - item.quantity > 0
         });
 
-        total += data.price * item.quantity;
+        const subtotal = data.price * item.quantity;
+        total += subtotal;
+        enrichedItems.push({
+          ...item,
+          name: data.name,
+          price: data.price,
+          subtotal
+        });
       }
 
       const orderRef = db.collection('orders').doc();
@@ -99,7 +112,7 @@ const placeOrder = async (req, res) => {
         id: orderRef.id,
         userId: req.user.uid,
         studentName: req.user.name || "Student",
-        items,
+        items: enrichedItems,
         total,
         status: "pending",
         timeSlot,
@@ -115,7 +128,8 @@ const placeOrder = async (req, res) => {
     res.json({ success: true, data: result });
 
   } catch (e) {
-    res.status(400).json({ message: e.message });
+    console.error('placeOrder error:', e);
+    res.status(400).json({ success: false, message: e.message });
   }
 };
 
@@ -136,33 +150,54 @@ const getOrders = async (req, res) => {
     const orders = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
-    }));
+    })).sort((a,b) => (a.createdAt < b.createdAt ? 1 : -1));
 
     res.json({ success: true, data: { orders } });
 
-  } catch {
-    res.status(500).json({ message: "Error fetching orders" });
+  } catch (error) {
+    console.error('getOrders error:', error);
+    res.status(500).json({ success: false, message: "Error fetching orders" });
   }
 };
 
 // 🔄 UPDATE ORDER STATUS
 const updateOrderStatus = async (req, res) => {
-  const flow = ["pending", "preparing", "ready", "completed"];
+  try {
+    const allowedStatuses = ["pending", "preparing", "ready", "completed", "cancelled"];
+    const flow = ["pending", "preparing", "ready", "completed"];
 
-  const db = getFirestore();
-  const ref = db.collection('orders').doc(req.params.id);
-  const doc = await ref.get();
+    const db = getFirestore();
+    const ref = db.collection('orders').doc(req.params.id);
+    const snapshot = await ref.get();
 
-  const current = doc.data().status;
-  const next = req.body.status;
+    if (!snapshot.exists) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
 
-  if (flow.indexOf(next) !== flow.indexOf(current) + 1) {
-    return res.status(400).json({ message: "Invalid status flow" });
+    const order = snapshot.data();
+    const current = order.status;
+    const next = req.body.status;
+
+    if (!allowedStatuses.includes(next)) {
+      return res.status(400).json({ success: false, message: "Invalid status" });
+    }
+
+    // Optional flow check for admin convenience, but allow explicit jumps if needed?
+    // User wants to mark as preparing -> ready -> completed.
+    // If it's a student marking as completed, verify it's ready.
+    if (req.user.role === 'student' && next === 'completed') {
+       if (current !== 'ready') {
+         return res.status(400).json({ success: false, message: "Order must be ready before completion" });
+       }
+    }
+
+    await ref.update({ status: next, updatedAt: new Date().toISOString() });
+
+    res.json({ success: true, message: "Order status updated", data: { id: req.params.id, status: next } });
+  } catch (error) {
+    console.error('updateOrderStatus error:', error);
+    res.status(500).json({ success: false, message: "Error updating order status" });
   }
-
-  await ref.update({ status: next });
-
-  res.json({ message: "Updated" });
 };
 
 // ❌ REMOVE ITEM (ADMIN)
@@ -172,13 +207,15 @@ const removeItem = async (req, res) => {
     const ref = db.collection('canteen_items').doc(req.params.id);
 
     await ref.update({
-      is_available: false
+      is_available: false,
+      updatedAt: new Date().toISOString()
     });
 
-    res.json({ message: "Item removed" });
+    res.json({ success: true, message: "Item removed" });
 
-  } catch {
-    res.status(500).json({ message: "Error removing item" });
+  } catch (error) {
+    console.error('removeItem error:', error);
+    res.status(500).json({ success: false, message: "Error removing item" });
   }
 };
 

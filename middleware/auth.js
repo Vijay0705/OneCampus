@@ -6,7 +6,7 @@ const authenticate = async (req, res, next) => {
     const header = req.headers.authorization;
 
     if (!header || !header.startsWith('Bearer ')) {
-      return res.status(401).json({ message: "No token" });
+      return res.status(401).json({ success: false, message: 'No token provided' });
     }
 
     const token = header.split(' ')[1];
@@ -16,22 +16,29 @@ const authenticate = async (req, res, next) => {
     const userDoc = await db.collection('users').doc(decoded.uid).get();
 
     if (!userDoc.exists) {
-      return res.status(401).json({ message: "User not found" });
+      return res.status(401).json({ success: false, message: 'User not found' });
     }
 
-    req.user = { uid: decoded.uid, ...userDoc.data() };
+    const userData = userDoc.data();
+    req.user = {
+      uid: decoded.uid,
+      id: decoded.uid,
+      role: userData.role || decoded.role || 'student',
+      ...userData,
+    };
 
-    next();
-  } catch {
-    res.status(401).json({ message: "Invalid token" });
+    return next();
+  } catch (error) {
+    return res.status(401).json({ success: false, message: 'Invalid token' });
   }
 };
 
 const authorize = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role)) {
-    return res.status(403).json({ message: "Access denied" });
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({ success: false, message: 'Access denied' });
   }
-  next();
+
+  return next();
 };
 
 module.exports = { authenticate, authorize };

@@ -1,162 +1,127 @@
 const express = require('express');
-const router = express.Router();
-const { getFirestore, getRealtimeDb } = require('../config/firebase');
-
-// 🔄 UPDATE LOCATION
-const updateLocation = async (req, res) => {
-  try {
-    const { bus_id, latitude, longitude } = req.body;
-
-    const db = getRealtimeDb();
-    const ref = db.ref(`locations/${bus_id}`);
-
-    const prev = (await ref.once('value')).val();
-
-    // 🚫 Prevent fake jumps
-    if (prev) {
-      const diff = Math.abs(prev.latitude - latitude) + Math.abs(prev.longitude - longitude);
-      if (diff > 0.5) {
-        return res.status(400).json({ message: "Fake GPS detected" });
-      }
-    }
-
-    const data = {
-      bus_id,
-      latitude,
-      longitude,
-      updatedAt: new Date().toISOString()
-    };
-
-    await ref.set(data);
-
-    res.json({ success: true, data });
-
-  } catch (err) {
-    res.status(500).json({ message: "Failed to update location" });
-  }
-};
-
-// 🚌 GET ALL BUSES
-const getAllBuses = async (req, res) => {
-  try {
-    const db = getFirestore();
-    const snapshot = await db.collection('buses').get();
-
-    const buses = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-
-    res.json({ success: true, data: { buses } });
-
-  } catch {
-    res.status(500).json({ message: "Error fetching buses" });
-  }
-};
-
-// ➕ CREATE BUS (ADMIN)
-const createBus = async (req, res) => {
-  try {
-    const db = getFirestore();
-    const { bus_number, route_name, capacity } = req.body;
-
-    const ref = db.collection('buses').doc();
-
-    await ref.set({
-      id: ref.id,
-      bus_number,
-      route_name,
-      capacity: capacity || 50,
-      createdAt: new Date().toISOString()
-    });
-
-    res.json({ message: "Bus created" });
-
-  } catch {
-    res.status(500).json({ message: "Error creating bus" });
-  }
-};
-
-// 📅 CREATE SCHEDULE
-const createSchedule = async (req, res) => {
-  try {
-    const db = getFirestore();
-    const { bus_id, date, stops } = req.body;
-
-    const ref = db.collection('schedules').doc();
-
-    await ref.set({
-      id: ref.id,
-      bus_id,
-      date,
-      stops,
-      createdAt: new Date().toISOString()
-    });
-
-    res.json({ message: "Schedule created" });
-
-  } catch {
-    res.status(500).json({ message: "Error creating schedule" });
-  }
-};
-
-// 📅 GET SCHEDULES
-const getSchedules = async (req, res) => {
-  try {
-    const db = getFirestore();
-    const { date } = req.query;
-
-    const snapshot = await db.collection('schedules')
-      .where('date', '==', date)
-      .get();
-
-    const schedules = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-
-    res.json({ success: true, data: { schedules } });
-
-  } catch {
-    res.status(500).json({ message: "Error fetching schedules" });
-  }
-};
-
-// 📍 GET BUS LOCATION
-const getBusLocation = async (req, res) => {
-  try {
-    const db = getRealtimeDb();
-    const snapshot = await db.ref(`locations/${req.params.bus_id}`).once('value');
-
-    const location = snapshot.val();
-
-    if (!location) {
-      return res.status(404).json({ message: "No location found" });
-    }
-
-    // ⏱️ Offline detection
-    const last = new Date(location.updatedAt).getTime();
-    const now = Date.now();
-
-    const isOffline = now - last > 30000;
-
-    res.json({
-      success: true,
-      data: { location: { ...location, isOffline } }
-    });
-
-  } catch {
-    res.status(500).json({ message: "Error fetching location" });
-  }
-};
-
-module.exports = {
+const { body, param, query } = require('express-validator');
+const {
   updateLocation,
   getAllBuses,
   createBus,
+  updateBus,
+  deleteBus,
   createSchedule,
+  updateSchedule,
+  deleteSchedule,
   getSchedules,
-  getBusLocation
-};
+  getBusLocation,
+  getAllBusLocations,
+} = require('../controllers/trackingController');
+const { authenticate, authorize } = require('../middleware/auth');
+const { validate } = require('../middleware/validate');
+
+const router = express.Router();
+
+router.post(
+  '/location',
+  authenticate,
+  [
+    body('bus_id').notEmpty().withMessage('bus_id is required'),
+    body('latitude').isFloat().withMessage('latitude must be a number'),
+    body('longitude').isFloat().withMessage('longitude must be a number'),
+  ],
+  validate,
+  updateLocation,
+);
+
+router.get('/location', authenticate, getAllBusLocations);
+
+router.get(
+  '/location/:bus_id',
+  authenticate,
+  [param('bus_id').notEmpty().withMessage('bus id is required')],
+  validate,
+  getBusLocation,
+);
+
+router.get('/buses', authenticate, getAllBuses);
+
+router.post(
+  '/buses',
+  authenticate,
+  authorize('admin', 'staff'),
+  [
+    body('bus_number').notEmpty().withMessage('bus_number is required'),
+    body('route_name').notEmpty().withMessage('route_name is required'),
+    body('capacity').optional().isInt({ min: 1 }),
+    body('is_active').optional().isBoolean(),
+  ],
+  validate,
+  createBus,
+);
+
+router.put(
+  '/buses/:id',
+  authenticate,
+  authorize('admin', 'staff'),
+  [
+    param('id').notEmpty(),
+    body('capacity').optional().isInt({ min: 1 }),
+    body('is_active').optional().isBoolean(),
+  ],
+  validate,
+  updateBus,
+);
+
+router.delete(
+  '/buses/:id',
+  authenticate,
+  authorize('admin', 'staff'),
+  [param('id').notEmpty()],
+  validate,
+  deleteBus,
+);
+
+router.get(
+  '/schedules',
+  authenticate,
+  [query('date').optional().isString()],
+  validate,
+  getSchedules,
+);
+
+router.post(
+  '/schedules',
+  authenticate,
+  authorize('admin', 'staff'),
+  [
+    body('bus_id').notEmpty().withMessage('bus_id is required'),
+    body('date').notEmpty().withMessage('date is required'),
+    body('stops').optional().isArray(),
+    body('departure_time').optional().isString(),
+    body('arrival_time').optional().isString(),
+  ],
+  validate,
+  createSchedule,
+);
+
+router.put(
+  '/schedules/:id',
+  authenticate,
+  authorize('admin', 'staff'),
+  [
+    param('id').notEmpty(),
+    body('stops').optional().isArray(),
+    body('departure_time').optional().isString(),
+    body('arrival_time').optional().isString(),
+  ],
+  validate,
+  updateSchedule,
+);
+
+router.delete(
+  '/schedules/:id',
+  authenticate,
+  authorize('admin', 'staff'),
+  [param('id').notEmpty()],
+  validate,
+  deleteSchedule,
+);
 
 module.exports = router;

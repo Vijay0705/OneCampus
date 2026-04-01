@@ -2,16 +2,14 @@ const express = require('express');
 const router = express.Router();
 
 const upload = require('../middleware/upload');
+const { authenticate } = require('../middleware/auth');
 
 const {
   uploadMaterial,
-  getMaterials
+  getMaterials,
 } = require('../controllers/materialController');
 
-// Upload PDF
-router.post('/', upload.single('file'), uploadMaterial);
-
-// Get all
-router.get('/', getMaterials);
+router.post('/', authenticate, upload.single('file'), uploadMaterial);
+router.get('/', authenticate, getMaterials);
 
 module.exports = router;

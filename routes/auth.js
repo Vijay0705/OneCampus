@@ -1,6 +1,14 @@
 const express = require('express');
 const { body } = require('express-validator');
-const { register, login, getProfile, updateProfile } = require('../controllers/authController');
+const {
+  register,
+  login,
+  getProfile,
+  updateProfile,
+  saveDeviceToken,
+  removeDeviceToken,
+  logout,
+} = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 
@@ -15,7 +23,7 @@ router.post(
     body('role').optional().isIn(['student', 'admin', 'staff']).withMessage('Invalid role'),
   ],
   validate,
-  register
+  register,
 );
 
 router.post(
@@ -25,10 +33,45 @@ router.post(
     body('password').notEmpty().withMessage('Password is required'),
   ],
   validate,
-  login
+  login,
 );
 
 router.get('/profile', authenticate, getProfile);
-router.put('/profile', authenticate, updateProfile);
+
+router.put(
+  '/profile',
+  authenticate,
+  [
+    body('name').optional().isString(),
+    body('email').optional().isEmail().normalizeEmail().withMessage('Valid email is required'),
+    body('phone').optional().isString(),
+    body('dept').optional().isString(),
+    body('year').optional(),
+    body('studentId').optional().isString(),
+  ],
+  validate,
+  updateProfile,
+);
+
+router.post(
+  '/device-token',
+  authenticate,
+  [
+    body('token').notEmpty().withMessage('Device token is required'),
+    body('platform').optional().isIn(['android', 'ios', 'web', 'macos', 'windows', 'linux']),
+  ],
+  validate,
+  saveDeviceToken,
+);
+
+router.delete(
+  '/device-token',
+  authenticate,
+  [body('token').notEmpty().withMessage('Device token is required')],
+  validate,
+  removeDeviceToken,
+);
+
+router.post('/logout', authenticate, logout);
 
 module.exports = router;

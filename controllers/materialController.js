@@ -1,94 +1,87 @@
-const { getFirestore } = require('../config/firebase');
-const admin = require('firebase-admin');
+const { getFirestore, getStorageBucket } = require('../config/firebase');
 
-// UPLOAD material
-exports.uploadMaterial = async (req, res) => {
+const uploadMaterial = async (req, res) => {
   try {
     const db = getFirestore();
-    const bucket = admin.storage().bucket(); // ✅ safe now (after init)
-
+    const bucket = getStorageBucket();
     const file = req.file;
 
     if (!file) {
-      return res.status(400).json({ error: "No file uploaded" });
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    // ✅ Only PDF allowed
     if (file.mimetype !== 'application/pdf') {
-      return res.status(400).json({ error: "Only PDF files allowed" });
+      return res.status(400).json({ success: false, message: 'Only PDF files allowed' });
+    }
+
+    const { title, subject, semester, type } = req.body;
+
+    if (!title || !subject) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title and subject are required',
+      });
     }
 
     const fileName = `materials/${Date.now()}_${file.originalname}`;
     const fileUpload = bucket.file(fileName);
 
-    const stream = fileUpload.createWriteStream({
+    await fileUpload.save(file.buffer, {
       metadata: {
         contentType: file.mimetype,
+        cacheControl: 'public,max-age=3600',
       },
     });
 
-    stream.end(file.buffer);
+    const fileUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
 
-    stream.on('finish', async () => {
-      const fileUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+    const ref = db.collection('materials').doc();
+    const newMaterial = {
+      id: ref.id,
+      title,
+      subject,
+      type: type || 'notes',
+      semester: semester || 'N/A',
+      fileUrl,
+      uploadedBy: req.user?.uid || req.user?.id || 'unknown',
+      uploaderName: req.user?.name || 'Unknown',
+      createdAt: new Date().toISOString(),
+      downloads: 0,
+      likes: 0,
+    };
 
-      const { title, subject, semester } = req.body;
+    await ref.set(newMaterial);
 
-      if (!title || !subject) {
-        return res.status(400).json({ error: "Title and subject are required" });
-      }
-
-      const newMaterial = {
-        title,
-        subject,
-        semester: semester || "N/A",
-        fileUrl,
-        uploadedBy: req.user?.id || "student",
-        createdAt: new Date(),
-        downloads: 0,
-        likes: 0
-      };
-
-      const docRef = await db.collection('materials').add(newMaterial);
-
-      res.status(201).json({
-        success: true,
-        message: "File uploaded successfully",
-        id: docRef.id,
-        fileUrl
-      });
+    return res.status(201).json({
+      success: true,
+      message: 'File uploaded successfully',
+      data: { material: newMaterial },
     });
-
-    stream.on('error', (err) => {
-      console.error("❌ Upload stream error:", err);
-      res.status(500).json({ error: err.message });
-    });
-
   } catch (err) {
-    console.error("❌ uploadMaterial error:", err);
-    res.status(500).json({ error: err.message });
+    console.error('uploadMaterial error:', err);
+    return res.status(500).json({ success: false, message: 'Upload failed' });
   }
 };
 
-// GET all materials
-exports.getMaterials = async (req, res) => {
+const getMaterials = async (req, res) => {
   try {
     const db = getFirestore();
 
-    const snapshot = await db
-      .collection('materials')
-      .orderBy('createdAt', 'desc')
-      .get();
+    const snapshot = await db.collection('materials').orderBy('createdAt', 'desc').get();
 
-    const materials = snapshot.docs.map(doc => ({
+    const materials = snapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
     }));
 
-    res.json(materials);
-
+    return res.json({ success: true, data: materials });
   } catch (err) {
-    console.error("❌ getMaterials error:", err);
-    res.status(500).json({ error: err.message });
+    console.error('getMaterials error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch materials' });
   }
+};
+
+module.exports = {
+  uploadMaterial,
+  getMaterials,
 };
