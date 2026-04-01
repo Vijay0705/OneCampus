@@ -39,6 +39,7 @@ class CanteenProvider extends ChangeNotifier {
           .map((i) => CanteenItem.fromJson(i as Map<String, dynamic>))
           .toList();
     } on ApiException catch (e) {
+      print("Canteen API Error: ${e.message}");
       _errorMessage = e.message;
     } finally {
       _loadingItems = false;
@@ -54,8 +55,10 @@ class CanteenProvider extends ChangeNotifier {
       final res = await ApiService.get(AppConstants.canteenOrdersUrl);
       _orders = (res['data']['orders'] as List)
           .map((o) => CanteenOrder.fromJson(o as Map<String, dynamic>))
+          .map((o) => o.copyWith(status: o.status.toLowerCase())) // 🔥 FIX
           .toList();
     } on ApiException catch (e) {
+      print("Canteen API Error: ${e.message}");
       _errorMessage = e.message;
     } finally {
       _loadingOrders = false;
@@ -71,9 +74,24 @@ class CanteenProvider extends ChangeNotifier {
     _loadingOrders = true;
     notifyListeners();
     try {
-      await ApiService.patch('${AppConstants.canteenOrderUrl}/$orderId/status', {'status': status});
-      await fetchOrders();
-    } on ApiException catch(e) {
+      final normalized = status.toLowerCase(); // 🔥 FIX
+
+      await ApiService.patch(
+        '${AppConstants.canteenOrderUrl}/$orderId/status',
+        {'status': normalized},
+      );
+
+      // 🔥 INSTANT UI UPDATE
+      final index = _orders.indexWhere((o) => o.id == orderId);
+      if (index != -1) {
+        _orders[index] = _orders[index].copyWith(status: normalized);
+      }
+
+      notifyListeners();
+
+      await fetchOrders(); // backend sync
+    } on ApiException catch (e) {
+      print("Canteen API Error: ${e.message}");
       _errorMessage = e.message;
     } finally {
       _loadingOrders = false;
@@ -81,7 +99,6 @@ class CanteenProvider extends ChangeNotifier {
     }
   }
 
-  /// Called by the student after picking up their food (status must be 'ready').
   Future<bool> markOrderCompleted(String orderId) async {
     _errorMessage = null;
     notifyListeners();
@@ -90,11 +107,14 @@ class CanteenProvider extends ChangeNotifier {
         '${AppConstants.canteenOrderUrl}/$orderId/status',
         {'status': 'completed'},
       );
+
       await fetchOrders();
+
       _successMessage = 'Order marked as completed!';
       notifyListeners();
       return true;
     } on ApiException catch (e) {
+      print("Canteen API Error: ${e.message}");
       _errorMessage = e.message;
       notifyListeners();
       return false;
@@ -155,12 +175,17 @@ class CanteenProvider extends ChangeNotifier {
       final orderItems = _cart
           .map((c) => {'item_id': c.item.id, 'quantity': c.quantity})
           .toList();
+
       await ApiService.post(AppConstants.canteenOrderUrl, {'items': orderItems});
+
+      await fetchOrders(); // 🔥 FIX (instant update)
+
       _successMessage = 'Order placed! Check your order status.';
       clearCart();
-      await fetchTodayItems(); // Refresh quantities
+      await fetchTodayItems();
       return true;
     } on ApiException catch (e) {
+      print("Canteen API Error: ${e.message}");
       _errorMessage = e.message;
       return false;
     } finally {
@@ -188,16 +213,18 @@ class CanteenProvider extends ChangeNotifier {
     notifyListeners();
     try {
       await ApiService.post(AppConstants.canteenAddItemUrl, {
-        'name': name,
-        'description': description,
+        'name': name.trim(), // 🔥 FIX
+        'description': description.trim(), // 🔥 FIX
         'price': price,
         'quantity': quantity,
         'category': category,
       });
+
       _successMessage = 'Item added to today\'s menu!';
       await fetchTodayItems();
       return true;
     } on ApiException catch (e) {
+      print("Canteen API Error: ${e.message}");
       _errorMessage = e.message;
       return false;
     } finally {

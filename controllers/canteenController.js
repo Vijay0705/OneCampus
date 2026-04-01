@@ -1,4 +1,5 @@
 const { getFirestore } = require('../config/firebase');
+const { sendCanteenStatusNotification } = require('../services/notificationService');
 
 const MAX_ORDERS_PER_SLOT = 50;
 
@@ -192,6 +193,19 @@ const updateOrderStatus = async (req, res) => {
     }
 
     await ref.update({ status: next, updatedAt: new Date().toISOString() });
+
+    // Trigger push notification if status changed to preparing or ready
+    if (next === 'preparing' || next === 'ready') {
+      try {
+        await sendCanteenStatusNotification({
+          userId: order.userId,
+          orderId: req.params.id,
+          status: next
+        });
+      } catch (err) {
+        console.error('Failed to send canteen notification:', err);
+      }
+    }
 
     res.json({ success: true, message: "Order status updated", data: { id: req.params.id, status: next } });
   } catch (error) {

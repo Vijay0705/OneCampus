@@ -162,6 +162,53 @@ const sendAnnouncementNotificationToStudents = async ({
   };
 };
 
+const sendCanteenStatusNotification = async ({ userId, orderId, status }) => {
+  const db = getFirestore();
+  const messaging = getMessaging();
+
+  const tokenRecords = await loadStudentTokens(db, [userId]);
+  if (!tokenRecords.length) return;
+
+  const tokens = tokenRecords.map((r) => r.token);
+
+  let title = 'Order Update 🍛';
+  let body = `Your order status is now: ${status.toUpperCase()}`;
+
+  if (status === 'preparing') {
+    body = 'The kitchen has started preparing your delicious meal!';
+  } else if (status === 'ready') {
+    title = 'Ready for Pickup! 🍽️';
+    body = 'Your order is hot and ready. Please head to the canteen!';
+  }
+
+  await messaging.sendEachForMulticast({
+    tokens,
+    notification: { title, body },
+    data: {
+      type: 'canteen_order',
+      orderId,
+      status,
+      click_action: 'FLUTTER_NOTIFICATION_CLICK',
+    },
+    android: {
+      priority: 'high',
+      notification: {
+        channelId: 'canteen_updates',
+      },
+    },
+  });
+
+  await db.collection('notification_logs').add({
+    type: 'canteen_order',
+    userId,
+    orderId,
+    status,
+    totalTokens: tokens.length,
+    createdAt: new Date().toISOString(),
+  });
+};
+
 module.exports = {
   sendAnnouncementNotificationToStudents,
-};
+  sendCanteenStatusNotification,
+};

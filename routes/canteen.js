@@ -32,7 +32,7 @@ router.get('/today-items', authenticate, getTodayItems);
 router.post(
   '/order',
   authenticate,
-  authorize('student'),
+  authorize('student', 'staff'),
   [
     body('items').isArray({ min: 1 }).withMessage('items must be a non-empty array'),
     body('items.*.item_id').notEmpty().withMessage('Each item must have item_id'),
@@ -47,7 +47,7 @@ router.get('/orders', authenticate, getOrders);
 router.patch(
   '/order/:id/status',
   authenticate,
-  authorize('admin', 'staff'),
+  authorize('admin', 'staff', 'student'),
   [
     param('id').notEmpty(),
     body('status').isIn(['pending', 'preparing', 'ready', 'completed', 'cancelled']),
