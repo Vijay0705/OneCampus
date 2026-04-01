@@ -11,6 +11,8 @@ const authRoutes = require('./routes/auth');
 const trackingRoutes = require('./routes/tracking');
 const canteenRoutes = require('./routes/canteen');
 const marketplaceRoutes = require('./routes/marketplace');
+const timetableRoutes = require('./routes/timetableRoutes');
+
 
 // 🆕 NEW routes
 const announcementRoutes = require('./routes/announcements');
@@ -76,6 +78,8 @@ app.use('/api/marketplace', marketplaceRoutes);
 // 🆕 NEW FEATURES
 app.use('/api/announcements', announcementRoutes);
 app.use('/api/materials', materialRoutes);
+app.use('/api', timetableRoutes);
+
 
 
 // ❌ 404 handler
