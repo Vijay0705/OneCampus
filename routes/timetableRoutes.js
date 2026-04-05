@@ -1,4 +1,5 @@
-// ✅ FIXED — Full CRUD timetable backed by Firestore
+// ✅ FINAL — Clean Timetable Routes (Firestore + Proper API Paths)
+
 const express = require('express');
 const router = express.Router();
 const { getFirestore } = require('../config/firebase');
@@ -6,11 +7,11 @@ const { authenticate, authorize } = require('../middleware/auth');
 
 const COLLECTION = 'timetable';
 
-/* ──────────────────────────────────────────────────────────────
-   GET /api/timetable?department=CSE&year=1st Year&section=A
-   Public (authenticated only) — students & staff can read
-────────────────────────────────────────────────────────────── */
-router.get('/timetable', authenticate, async (req, res) => {
+/* ─────────────────────────────────────────────
+   ✅ GET /api/timetable
+   Query: department, year, section
+──────────────────────────────────────────── */
+router.get('/', authenticate, async (req, res) => {
   try {
     const { department, year, section } = req.query;
 
@@ -22,8 +23,7 @@ router.get('/timetable', authenticate, async (req, res) => {
     }
 
     const db = getFirestore();
-    // ✅ FIXED — query without orderBy to avoid index requirement;
-    //   sorted JS-side so app works even before Firestore index is built
+
     const snapshot = await db
       .collection(COLLECTION)
       .where('department', '==', department)
@@ -40,25 +40,40 @@ router.get('/timetable', authenticate, async (req, res) => {
         return (a.startTime || '').localeCompare(b.startTime || '');
       });
 
-    return res.json({ success: true, data });
+    return res.json({
+      success: true,
+      data,
+    });
+
   } catch (error) {
     console.error('GET timetable error:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return res.status(500).json({
+      success: false,
+      message: 'Server error',
+    });
   }
 });
 
-/* ──────────────────────────────────────────────────────────────
-   POST /api/timetable/add   (Admin / Staff only)
-   Body: { department, year, section, day, subject, room, startTime, endTime }
-────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   ✅ POST /api/timetable/add
+   Admin / Staff only
+──────────────────────────────────────────── */
 router.post(
-  '/timetable/add',
+  '/add',
   authenticate,
   authorize('admin', 'staff'),
   async (req, res) => {
     try {
-      const { department, year, section, day, subject, room, startTime, endTime } =
-        req.body;
+      const {
+        department,
+        year,
+        section,
+        day,
+        subject,
+        room,
+        startTime,
+        endTime
+      } = req.body;
 
       if (!department || !year || !section || !day || !subject || !startTime || !endTime) {
         return res.status(400).json({
@@ -68,9 +83,8 @@ router.post(
       }
 
       const db = getFirestore();
-      const ref = db.collection(COLLECTION).doc();
 
-      // ✅ ADDED — check for duplicate slot (same class, day, startTime)
+      // ✅ Check duplicate slot
       const dupSnap = await db
         .collection(COLLECTION)
         .where('department', '==', department)
@@ -83,9 +97,11 @@ router.post(
       if (!dupSnap.empty) {
         return res.status(409).json({
           success: false,
-          message: 'A period already exists for this slot. Edit or delete it first.',
+          message: 'A period already exists for this slot',
         });
       }
+
+      const ref = db.collection(COLLECTION).doc();
 
       const newPeriod = {
         id: ref.id,
@@ -109,81 +125,99 @@ router.post(
         message: 'Period added successfully',
         data: newPeriod,
       });
+
     } catch (error) {
       console.error('POST timetable/add error:', error);
-      return res.status(500).json({ success: false, message: 'Server error' });
+      return res.status(500).json({
+        success: false,
+        message: 'Server error',
+      });
     }
   }
 );
 
-/* ──────────────────────────────────────────────────────────────
-   PUT /api/timetable/:id   (Admin / Staff only)
-────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   ✅ PUT /api/timetable/:id
+   Admin / Staff only
+──────────────────────────────────────────── */
 router.put(
-  '/timetable/:id',
+  '/:id',
   authenticate,
   authorize('admin', 'staff'),
   async (req, res) => {
     try {
       const { id } = req.params;
-      const { department, year, section, day, subject, room, startTime, endTime } =
-        req.body;
 
       const db = getFirestore();
       const docRef = db.collection(COLLECTION).doc(id);
       const docSnap = await docRef.get();
 
       if (!docSnap.exists) {
-        return res.status(404).json({ success: false, message: 'Period not found' });
+        return res.status(404).json({
+          success: false,
+          message: 'Period not found',
+        });
       }
 
-      // ✅ UPDATED — merge only provided fields
       const updates = {
-        ...(department && { department }),
-        ...(year && { year }),
-        ...(section && { section }),
-        ...(day && { day }),
-        ...(subject && { subject }),
-        ...(room !== undefined && { room }),
-        ...(startTime && { startTime }),
-        ...(endTime && { endTime }),
+        ...req.body,
         updatedAt: new Date().toISOString(),
       };
 
       await docRef.update(updates);
 
-      const updated = { id, ...docSnap.data(), ...updates };
-      return res.json({ success: true, message: 'Period updated', data: updated });
+      return res.json({
+        success: true,
+        message: 'Period updated',
+        data: { id, ...docSnap.data(), ...updates },
+      });
+
     } catch (error) {
-      console.error('PUT timetable/:id error:', error);
-      return res.status(500).json({ success: false, message: 'Server error' });
+      console.error('PUT timetable error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error',
+      });
     }
   }
 );
 
-/* ──────────────────────────────────────────────────────────────
-   DELETE /api/timetable/:id   (Admin / Staff only)
-────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   ✅ DELETE /api/timetable/:id
+   Admin / Staff only
+──────────────────────────────────────────── */
 router.delete(
-  '/timetable/:id',
+  '/:id',
   authenticate,
   authorize('admin', 'staff'),
   async (req, res) => {
     try {
       const { id } = req.params;
+
       const db = getFirestore();
       const docRef = db.collection(COLLECTION).doc(id);
       const docSnap = await docRef.get();
 
       if (!docSnap.exists) {
-        return res.status(404).json({ success: false, message: 'Period not found' });
+        return res.status(404).json({
+          success: false,
+          message: 'Period not found',
+        });
       }
 
       await docRef.delete();
-      return res.json({ success: true, message: 'Period deleted' });
+
+      return res.json({
+        success: true,
+        message: 'Period deleted',
+      });
+
     } catch (error) {
-      console.error('DELETE timetable/:id error:', error);
-      return res.status(500).json({ success: false, message: 'Server error' });
+      console.error('DELETE timetable error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error',
+      });
     }
   }
 );
