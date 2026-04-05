@@ -1,4 +1,5 @@
 const { getFirestore, getStorageBucket } = require('../config/firebase');
+const { uploadToR2 } = require('../services/r2Upload');
 
 const uploadMaterial = async (req, res) => {
   try {
@@ -7,11 +8,17 @@ const uploadMaterial = async (req, res) => {
     const file = req.file;
 
     if (!file) {
-      return res.status(400).json({ success: false, message: 'No file uploaded' });
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded',
+      });
     }
 
     if (file.mimetype !== 'application/pdf') {
-      return res.status(400).json({ success: false, message: 'Only PDF files allowed' });
+      return res.status(400).json({
+        success: false,
+        message: 'Only PDF files allowed',
+      });
     }
 
     const { title, subject, semester, type } = req.body;
@@ -23,19 +30,30 @@ const uploadMaterial = async (req, res) => {
       });
     }
 
-    const fileName = `materials/${Date.now()}_${file.originalname}`;
-    const fileUpload = bucket.file(fileName);
+    let fileUrl = null;
 
-    await fileUpload.save(file.buffer, {
-      metadata: {
-        contentType: file.mimetype,
-        cacheControl: 'public,max-age=3600',
-      },
-    });
+    try {
+      // ✅ R2 upload (PRIMARY)
+      fileUrl = await uploadToR2(file, 'materials');
+    } catch (err) {
+      console.error('R2 upload failed, falling back:', err.message);
 
-    const fileUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+      // ✅ FALLBACK → Firebase (your original code)
+      const fileName = `materials/${Date.now()}_${file.originalname}`;
+      const fileUpload = bucket.file(fileName);
+
+      await fileUpload.save(file.buffer, {
+        metadata: {
+          contentType: file.mimetype,
+          cacheControl: 'public,max-age=3600',
+        },
+      });
+
+      fileUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+    }
 
     const ref = db.collection('materials').doc();
+
     const newMaterial = {
       id: ref.id,
       title,
@@ -59,7 +77,10 @@ const uploadMaterial = async (req, res) => {
     });
   } catch (err) {
     console.error('uploadMaterial error:', err);
-    return res.status(500).json({ success: false, message: 'Upload failed' });
+    return res.status(500).json({
+      success: false,
+      message: 'Upload failed',
+    });
   }
 };
 
@@ -67,7 +88,10 @@ const getMaterials = async (req, res) => {
   try {
     const db = getFirestore();
 
-    const snapshot = await db.collection('materials').orderBy('createdAt', 'desc').get();
+    const snapshot = await db
+      .collection('materials')
+      .orderBy('createdAt', 'desc')
+      .get();
 
     const materials = snapshot.docs.map((doc) => ({
       id: doc.id,
@@ -77,7 +101,10 @@ const getMaterials = async (req, res) => {
     return res.json({ success: true, data: materials });
   } catch (err) {
     console.error('getMaterials error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch materials' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch materials',
+    });
   }
 };
 
