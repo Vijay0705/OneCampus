@@ -78,7 +78,8 @@ app.use('/api/marketplace', marketplaceRoutes);
 // 🆕 NEW FEATURES
 app.use('/api/announcements', announcementRoutes);
 app.use('/api/materials', materialRoutes);
-app.use('/api', timetableRoutes);
+app.use('/api/timetable', timetableRoutes); // ✅ FIXED
+
 
 
 

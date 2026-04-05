@@ -1,139 +1,191 @@
+// ✅ FIXED — Full CRUD timetable backed by Firestore
 const express = require('express');
 const router = express.Router();
+const { getFirestore } = require('../config/firebase');
+const { authenticate, authorize } = require('../middleware/auth');
 
-/*
-  SAMPLE STRUCTURE:
-  department → year → section → timetable
-*/
+const COLLECTION = 'timetable';
 
-const timetableData = {
-  CSE: {
-    "1st Year": {
-      A: [
-        { day: "Monday", periods: ["Maths", "Physics", "Chemistry", "English"] },
-        { day: "Tuesday", periods: ["Biology", "Maths", "Physics", "Lab"] },
-        { day: "Wednesday", periods: ["Chemistry", "English", "Maths", "Sports"] },
-        { day: "Thursday", periods: ["Physics", "Maths", "Lab", "English"] },
-        { day: "Friday", periods: ["Maths", "Chemistry", "Physics", "Library"] }
-      ],
-      B: [
-        { day: "Monday", periods: ["Physics", "Maths", "English", "Chemistry"] },
-        { day: "Tuesday", periods: ["Maths", "Biology", "Lab", "Physics"] },
-        { day: "Wednesday", periods: ["English", "Maths", "Sports", "Chemistry"] },
-        { day: "Thursday", periods: ["Maths", "Physics", "English", "Lab"] },
-        { day: "Friday", periods: ["Chemistry", "Maths", "Library", "Physics"] }
-      ]
-    },
-
-    "2nd Year": {
-      A: [
-        { day: "Monday", periods: ["DSA", "OOPS", "DBMS", "Maths"] },
-        { day: "Tuesday", periods: ["OS", "DSA", "Lab", "DBMS"] },
-        { day: "Wednesday", periods: ["OOPS", "Maths", "DSA", "Sports"] },
-        { day: "Thursday", periods: ["DBMS", "OS", "Lab", "Maths"] },
-        { day: "Friday", periods: ["DSA", "OOPS", "Library", "DBMS"] }
-      ]
-    },
-
-    "3rd Year": {
-      A: [
-        { day: "Monday", periods: ["AI", "ML", "CN", "SE"] },
-        { day: "Tuesday", periods: ["Cloud", "AI", "Lab", "ML"] },
-        { day: "Wednesday", periods: ["CN", "SE", "AI", "Sports"] },
-        { day: "Thursday", periods: ["ML", "Cloud", "Lab", "SE"] },
-        { day: "Friday", periods: ["AI", "CN", "Library", "ML"] }
-      ]
-    },
-
-    "4th Year": {
-      A: [
-        { day: "Monday", periods: ["Project", "Seminar", "AI", "Elective"] },
-        { day: "Tuesday", periods: ["Internship", "Project", "Lab", "Elective"] },
-        { day: "Wednesday", periods: ["Seminar", "AI", "Project", "Sports"] },
-        { day: "Thursday", periods: ["Elective", "Lab", "Project", "AI"] },
-        { day: "Friday", periods: ["Project", "Seminar", "Library", "Elective"] }
-      ]
-    }
-  },
-
-  ECE: {
-    "1st Year": {
-      A: [
-        { day: "Monday", periods: ["Maths", "Physics", "Basic Electronics", "English"] },
-        { day: "Tuesday", periods: ["Maths", "Lab", "Physics", "Chemistry"] },
-        { day: "Wednesday", periods: ["Electronics", "Maths", "English", "Sports"] },
-        { day: "Thursday", periods: ["Physics", "Maths", "Lab", "English"] },
-        { day: "Friday", periods: ["Maths", "Electronics", "Library", "Physics"] }
-      ]
-    }
-  },
-
-  MECH: {
-    "1st Year": {
-      A: [
-        { day: "Monday", periods: ["Maths", "Physics", "Workshop", "English"] },
-        { day: "Tuesday", periods: ["Mechanics", "Maths", "Lab", "Physics"] },
-        { day: "Wednesday", periods: ["Workshop", "Maths", "English", "Sports"] },
-        { day: "Thursday", periods: ["Physics", "Mechanics", "Lab", "Maths"] },
-        { day: "Friday", periods: ["Maths", "Workshop", "Library", "Physics"] }
-      ]
-    }
-  }
-};
-
-
-/*
-  GET /api/timetable?department=CSE&year=1st Year&section=A
-*/
-
-router.get('/timetable', (req, res) => {
+/* ──────────────────────────────────────────────────────────────
+   GET /api/timetable?department=CSE&year=1st Year&section=A
+   Public (authenticated only) — students & staff can read
+────────────────────────────────────────────────────────────── */
+router.get('/timetable', authenticate, async (req, res) => {
   try {
     const { department, year, section } = req.query;
 
-    // Validation
     if (!department || !year || !section) {
       return res.status(400).json({
         success: false,
-        message: "Please provide department, year, and section"
+        message: 'department, year, and section are required',
       });
     }
 
-    const deptData = timetableData[department];
-    if (!deptData) {
-      return res.status(404).json({
-        success: false,
-        message: "Department not found"
+    const db = getFirestore();
+    // ✅ FIXED — query without orderBy to avoid index requirement;
+    //   sorted JS-side so app works even before Firestore index is built
+    const snapshot = await db
+      .collection(COLLECTION)
+      .where('department', '==', department)
+      .where('year', '==', year)
+      .where('section', '==', section)
+      .get();
+
+    const data = snapshot.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .sort((a, b) => {
+        const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+        const dayDiff = days.indexOf(a.day) - days.indexOf(b.day);
+        if (dayDiff !== 0) return dayDiff;
+        return (a.startTime || '').localeCompare(b.startTime || '');
       });
-    }
 
-    const yearData = deptData[year];
-    if (!yearData) {
-      return res.status(404).json({
-        success: false,
-        message: "Year not found"
-      });
-    }
-
-    const sectionData = yearData[section];
-    if (!sectionData) {
-      return res.status(404).json({
-        success: false,
-        message: "Section not found"
-      });
-    }
-
-    return res.json({
-      success: true,
-      data: sectionData
-    });
-
+    return res.json({ success: true, data });
   } catch (error) {
-    console.error("Timetable Error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server Error"
-    });
+    console.error('GET timetable error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+/* ──────────────────────────────────────────────────────────────
+   POST /api/timetable/add   (Admin / Staff only)
+   Body: { department, year, section, day, subject, room, startTime, endTime }
+────────────────────────────────────────────────────────────── */
+router.post(
+  '/timetable/add',
+  authenticate,
+  authorize('admin', 'staff'),
+  async (req, res) => {
+    try {
+      const { department, year, section, day, subject, room, startTime, endTime } =
+        req.body;
+
+      if (!department || !year || !section || !day || !subject || !startTime || !endTime) {
+        return res.status(400).json({
+          success: false,
+          message: 'department, year, section, day, subject, startTime, endTime are required',
+        });
+      }
+
+      const db = getFirestore();
+      const ref = db.collection(COLLECTION).doc();
+
+      // ✅ ADDED — check for duplicate slot (same class, day, startTime)
+      const dupSnap = await db
+        .collection(COLLECTION)
+        .where('department', '==', department)
+        .where('year', '==', year)
+        .where('section', '==', section)
+        .where('day', '==', day)
+        .where('startTime', '==', startTime)
+        .get();
+
+      if (!dupSnap.empty) {
+        return res.status(409).json({
+          success: false,
+          message: 'A period already exists for this slot. Edit or delete it first.',
+        });
+      }
+
+      const newPeriod = {
+        id: ref.id,
+        department,
+        year,
+        section,
+        day,
+        subject,
+        room: room || '',
+        startTime,
+        endTime,
+        createdBy: req.user?.uid || 'unknown',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await ref.set(newPeriod);
+
+      return res.status(201).json({
+        success: true,
+        message: 'Period added successfully',
+        data: newPeriod,
+      });
+    } catch (error) {
+      console.error('POST timetable/add error:', error);
+      return res.status(500).json({ success: false, message: 'Server error' });
+    }
+  }
+);
+
+/* ──────────────────────────────────────────────────────────────
+   PUT /api/timetable/:id   (Admin / Staff only)
+────────────────────────────────────────────────────────────── */
+router.put(
+  '/timetable/:id',
+  authenticate,
+  authorize('admin', 'staff'),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { department, year, section, day, subject, room, startTime, endTime } =
+        req.body;
+
+      const db = getFirestore();
+      const docRef = db.collection(COLLECTION).doc(id);
+      const docSnap = await docRef.get();
+
+      if (!docSnap.exists) {
+        return res.status(404).json({ success: false, message: 'Period not found' });
+      }
+
+      // ✅ UPDATED — merge only provided fields
+      const updates = {
+        ...(department && { department }),
+        ...(year && { year }),
+        ...(section && { section }),
+        ...(day && { day }),
+        ...(subject && { subject }),
+        ...(room !== undefined && { room }),
+        ...(startTime && { startTime }),
+        ...(endTime && { endTime }),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await docRef.update(updates);
+
+      const updated = { id, ...docSnap.data(), ...updates };
+      return res.json({ success: true, message: 'Period updated', data: updated });
+    } catch (error) {
+      console.error('PUT timetable/:id error:', error);
+      return res.status(500).json({ success: false, message: 'Server error' });
+    }
+  }
+);
+
+/* ──────────────────────────────────────────────────────────────
+   DELETE /api/timetable/:id   (Admin / Staff only)
+────────────────────────────────────────────────────────────── */
+router.delete(
+  '/timetable/:id',
+  authenticate,
+  authorize('admin', 'staff'),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const db = getFirestore();
+      const docRef = db.collection(COLLECTION).doc(id);
+      const docSnap = await docRef.get();
+
+      if (!docSnap.exists) {
+        return res.status(404).json({ success: false, message: 'Period not found' });
+      }
+
+      await docRef.delete();
+      return res.json({ success: true, message: 'Period deleted' });
+    } catch (error) {
+      console.error('DELETE timetable/:id error:', error);
+      return res.status(500).json({ success: false, message: 'Server error' });
+    }
+  }
+);
 
 module.exports = router;
