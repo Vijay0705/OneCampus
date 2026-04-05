@@ -18,7 +18,7 @@ const uploadToR2 = async (file, folder = "uploads") => {
     })
   );
 
-  return `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}/${key}`;
+  return `https://pub-e399cf5ff7684c79b45518f9c1c09c37.r2.dev/${key}`;
 };
 
 const deleteFromR2 = async (fileUrl) => {
