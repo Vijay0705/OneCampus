@@ -6,30 +6,34 @@ const uploadToR2 = async (file, folder = "uploads") => {
 
   const key = `${folder}/${Date.now()}_${file.originalname}`;
 
+  console.log("Uploading to R2...");
+  console.log("Bucket:", process.env.R2_BUCKET_NAME);
+
   await r2.send(
     new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET,
+      Bucket: process.env.R2_BUCKET_NAME, // ✅ FIXED
       Key: key,
       Body: file.buffer,
       ContentType: file.mimetype,
     })
   );
 
-  return `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/${key}`;
+  return `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}/${key}`;
 };
 
 const deleteFromR2 = async (fileUrl) => {
   try {
     if (!fileUrl) return;
 
-    const base = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/`;
+    const base = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}/`;
+
     if (!fileUrl.startsWith(base)) return;
 
     const key = fileUrl.replace(base, "");
 
     await r2.send(
       new DeleteObjectCommand({
-        Bucket: process.env.R2_BUCKET,
+        Bucket: process.env.R2_BUCKET_NAME, // ✅ FIXED
         Key: key,
       })
     );
