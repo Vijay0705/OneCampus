@@ -1,6 +1,6 @@
 // ✅ FIXED — materialController.js
 const { getFirestore } = require('../config/firebase');
-const { uploadToR2, deleteFromR2 } = require('../services/r2Upload');
+const { uploadToR2, deleteFromR2, getDownloadUrl } = require('../services/r2Upload');
 const path = require('path');
 
 // ✅ ADDED — Derive MIME type from extension when not set by multer
@@ -129,6 +129,11 @@ const deleteMaterial = async (req, res) => {
 
     const fileData = docSnap.data();
 
+    // ✅ FIXED — ownership check
+    if (fileData.uploadedBy !== req.user.id && fileData.uploadedBy !== req.user.uid && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, error: 'Unauthorized to delete this material' });
+    }
+
     // ✅ FIXED — delete from R2 only if URL is present
     if (fileData.fileUrl) {
       await deleteFromR2(fileData.fileUrl).catch((e) =>
@@ -144,4 +149,23 @@ const deleteMaterial = async (req, res) => {
   }
 };
 
-module.exports = { uploadMaterial, getMaterials, deleteMaterial };
+/* ──────────────────────────────────────────────────────────────
+   GET /api/materials/download?key=...
+   ✅ FIXED — Returns R2 signed URL
+────────────────────────────────────────────────────────────── */
+const downloadMaterial = async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ success: false, message: 'File key required' });
+
+    const signedUrl = await getDownloadUrl(key);
+    if (!signedUrl) return res.status(500).json({ success: false, message: 'Failed to generate download link' });
+
+    return res.json({ success: true, url: signedUrl });
+  } catch (err) {
+    console.error('downloadMaterial error:', err);
+    return res.status(500).json({ success: false, error: 'Download failed' });
+  }
+};
+
+module.exports = { uploadMaterial, getMaterials, deleteMaterial, downloadMaterial };

@@ -79,10 +79,30 @@ const addProduct = async (req, res) => {
 /* ================= GET ALL PRODUCTS ================= */
 const getProducts = async (req, res) => {
   try {
+    const { category, minPrice, maxPrice, status } = req.query;
     const db = getFirestore();
-    const snapshot = await db.collection('products').get();
-
-    const products = snapshot.docs.map(doc => doc.data());
+    
+    let query = db.collection('products');
+    
+    if (category && category !== 'All') {
+      query = query.where('category', '==', category);
+    }
+    
+    if (status) {
+      query = query.where('status', '==', status);
+    }
+    
+    const snapshot = await query.get();
+    let products = snapshot.docs.map(doc => doc.data());
+    
+    if (minPrice || maxPrice) {
+      products = products.filter(p => {
+        let price = Number(p.price) || 0;
+        if (minPrice && price < Number(minPrice)) return false;
+        if (maxPrice && price > Number(maxPrice)) return false;
+        return true;
+      });
+    }
 
     res.json({ success: true, data: products });
   } catch (error) {

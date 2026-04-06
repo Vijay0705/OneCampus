@@ -64,16 +64,7 @@ router.post(
   authorize('admin', 'staff'),
   async (req, res) => {
     try {
-      const {
-        department,
-        year,
-        section,
-        day,
-        subject,
-        room,
-        startTime,
-        endTime
-      } = req.body;
+      const { department, year, section, day, subject, room, startTime, endTime, facultyName, courseCode } = req.body;
 
       if (!department || !year || !section || !day || !subject || !startTime || !endTime) {
         return res.status(400).json({
@@ -111,6 +102,8 @@ router.post(
         day,
         subject,
         room: room || '',
+        facultyName: facultyName || '',
+        courseCode: courseCode || '',
         startTime,
         endTime,
         createdBy: req.user?.uid || 'unknown',

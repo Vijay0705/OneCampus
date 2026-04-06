@@ -1,4 +1,5 @@
-const { PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const r2 = require("./r2");
 
 const uploadToR2 = async (file, folder = "uploads") => {
@@ -42,4 +43,20 @@ const deleteFromR2 = async (fileUrl) => {
   }
 };
 
-module.exports = { uploadToR2, deleteFromR2 };
+const getDownloadUrl = async (fileKey) => {
+  try {
+    if (!fileKey) return null;
+    const command = new GetObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: fileKey,
+    });
+    // Link valid for 1 hour
+    const signedUrl = await getSignedUrl(r2, command, { expiresIn: 3600 });
+    return signedUrl;
+  } catch (err) {
+    console.error("R2 presign error:", err.message);
+    return null;
+  }
+};
+
+module.exports = { uploadToR2, deleteFromR2, getDownloadUrl };
